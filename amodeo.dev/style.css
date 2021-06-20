@@ -5,6 +5,8 @@ body {
 	font-display: block;
 	background-color: #111111;
 	color: white;
+	height: 100%;
+	margin: 0;
 }
 
 body.light {
@@ -29,10 +31,6 @@ body.light a:hover {
 	color: orange;
 }
 
-
-
-
-
 @media (min-width: 701px) {
 	.visible-mobile {
 		display: none;
@@ -53,6 +51,7 @@ body.light a:hover {
 			width: 200px;
 			height: 100%;
 			position: fixed;
+			margin-left: 20px;
 		}
 			
 			#nav-mobile { display: none; }
@@ -93,11 +92,11 @@ body.light a:hover {
 	}
 	
 	#outer {
-		width: 100%
+		margin: 10px;
 	}
 	
 		#edge {
-			height: 100px;
+			height: auto;
 			width: 100%;
 			float: none;
 			position: static;
@@ -133,7 +132,13 @@ body.light a:hover {
 	
 		#content {
 			width: 100%;
-			float: none; 
+			margin-bottom: 10px;
+			float: none;
+			font-size: 90%;
+		}
+		
+		#content h1 {
+			font-size: 150%;
 		}
 	#theme-lang-select {
 		text-align: right;

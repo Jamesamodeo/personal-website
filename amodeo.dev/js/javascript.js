@@ -66,7 +66,7 @@ function changeContent(newContent) {
 
 function showElementsOfClass(classnames, show) {
 	classname = classnames.join(' ');
-	const display = show ? 'inline' : 'none';
+	const display = show ? 'block' : 'none';
 	const toElements = document.getElementsByClassName(classname);
 	for (j = 0; j < toElements.length; j++) {
 		toElements[j].style.display = display;
@@ -78,9 +78,9 @@ function toggleTheme() {
 	const themeToggleDark = document.getElementById("dark-theme");
 	if (document.body.classList.toggle("light")) {
 		themeToggleLight.style.display = 'none';
-		themeToggleDark.style.display = 'inline';
+		themeToggleDark.style.display = 'block';
 	} else {
-		themeToggleLight.style.display = 'inline';
+		themeToggleLight.style.display = 'block';
 		themeToggleDark.style.display = 'none';
 	}
 }

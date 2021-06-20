@@ -32,16 +32,12 @@ body.light a:hover {
 }
 
 @media (min-width: 701px) {
-	.visible-mobile {
-		display: none;
-	}
-	.visible-desktop {
-		display: inline;
-	}
+	.visible-mobile { display: none; }
+	.visible-desktop { display: block; }
 
 	#outer {
-		width: 970px;
-		height: 100%;
+		max-width: 970px;
+		height: 100vh;
 		margin-left: auto;
 		margin-right: auto;
 	}
@@ -49,13 +45,13 @@ body.light a:hover {
 		#edge {
 			float: left;
 			width: 200px;
-			height: 100%;
+			height: 100vh;
 			position: fixed;
-			margin-left: 20px;
+			padding-left: 20px;
+			padding-top: 10px;
 		}
 			
 			#nav-mobile { display: none; }
-			
 			#nav-desktop { display: block; }
 			
 				#nav-desktop ul {
@@ -70,10 +66,11 @@ body.light a:hover {
 				#nav-desktop li:first-child {
 					margin-top: 0;
 				}
-				
+		
 		#content {
-			width: 680px;
-			float: right;
+			margin-left: 220px;
+			padding-left: 60px;
+			padding-top: 10px;
 		}
 	#theme-lang-select {
 		text-align: right;
@@ -84,23 +81,14 @@ body.light a:hover {
 }
 
 @media (max-width: 700px) {
-	.visible-mobile {
-		display: inline;
-	}
-	.visible-desktop {
-		display: none;
-	}
+	.visible-mobile { display: block; }
+	.visible-desktop { display: none; }
 	
 	#outer {
 		margin: 10px;
 	}
 	
-		#edge {
-			height: auto;
-			width: 100%;
-			float: none;
-			position: static;
-		}
+		#edge {}
 			
 			#nav-desktop { display: none; }
 			
@@ -133,7 +121,6 @@ body.light a:hover {
 		#content {
 			width: 100%;
 			margin-bottom: 10px;
-			float: none;
 			font-size: 90%;
 		}
 		

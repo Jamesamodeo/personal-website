@@ -1,5 +1,12 @@
 #dark-theme { display: none; }
 
+#graphics {
+	position: absolute;
+	width: 100vw;
+	height: 100vh;
+	z-index: -1;
+}
+
 body {
 	font-family: 'Roboto Mono', Monaco, Consolas, monospace;
 	font-display: block;

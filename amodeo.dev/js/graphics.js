@@ -1,45 +1,39 @@
 import * as THREE from './resources/three/build/three.module.js'
 import {BufferGeometryUtils} from './resources/three/examples/jsm/utils/BufferGeometryUtils.js';
 import {OrbitControls} from './resources/three/examples/jsm/controls/OrbitControls.js';
-	
-function Queue() {
-	this.elements = [];
-}
 
-Queue.prototype.enqueue = function (e) {
-	this.elements.push(e);
-};
-
-Queue.prototype.dequeue = function () {
-	return this.elements.shift();
-};
-
-Queue.prototype.isEmpty = function () {
-	return this.elements.length == 0;
-};
-
-Queue.prototype.peek = function () {
-	return !this.isEmpty() ? this.elements[0] : undefined;
-};
-
-Queue.prototype.length = function() {
-	return this.elements.length;
-}
-
-const TOWER_COUNT = 200;
-const POS_SCAN_COUNT = 5;
-const POS_RAY_STEP = 10;
+const CHUNK_ROWS = 5;
+const CHUNK_COLS = 12;
+const TOWERS_PER_CHUNK = 20;
+const CHUNK_SIZE = 100;
+const CHUNK_CORE_SIZE = 80;
+const CHUNK_CORE_OFFSET = (CHUNK_SIZE - CHUNK_CORE_SIZE) / 2;
 const TOWER_SIZE = 10;
 const SCROLL_SPEED = 100;
-const MESH_ORIGIN = { x: -250, y: 0, z: -250 };
+const MESH_ORIGIN = { x: 0, y: 0, z: 0 };
 const ORBIT_CONTROL = true;
 const BASE_GEOMETRY = false;
-const ORBIT_TARGET = new THREE.Vector3();
+const ORBIT_TARGET = new THREE.Vector3( 0, 0, 0 );
 
 const SURFACE_NEAR_WIDTH = 500;
 const SURFACE_FAR_WIDTH = 1000;
 const SURFACE_DEPTH = 500;
 const SURFACE_ORIGIN = { x: 0 - (SURFACE_NEAR_WIDTH / 2), y: 0 }
+
+const surface =
+{
+	nearLeft: SURFACE_ORIGIN,
+	nearRight: { x: SURFACE_ORIGIN.x + SURFACE_NEAR_WIDTH, y: SURFACE_ORIGIN.y },
+	farLeft: { x: SURFACE_ORIGIN.x - (SURFACE_FAR_WIDTH - SURFACE_NEAR_WIDTH) / 2, y: SURFACE_ORIGIN.y - SURFACE_DEPTH },
+	farRight: { x: SURFACE_ORIGIN.x + (SURFACE_FAR_WIDTH + SURFACE_NEAR_WIDTH) / 2, y: SURFACE_ORIGIN.y - SURFACE_DEPTH},
+
+	gradient: ( ( SURFACE_FAR_WIDTH - SURFACE_NEAR_WIDTH ) / 2 ) / SURFACE_DEPTH
+}
+
+const cullLine = {
+	p1: { x: surface.nearRight.x, y: surface.nearRight.y },
+	p2: { x: surface.farRight.x, y: surface.farRight.y }
+}
 
 let scrollSpeed = SCROLL_SPEED;
 
@@ -52,7 +46,7 @@ camera.position.set(0, 450, 500);
 
 if (ORBIT_CONTROL) {
 	const controls = new OrbitControls( camera, canvas );
-	controls.enableDamping = true;
+	controls.enableDamping = false;
 	controls.enablePan = true;
 	controls.minDistance = 1.2;
 	controls.maxDistance = 1000;
@@ -60,64 +54,42 @@ if (ORBIT_CONTROL) {
 	controls.update();
 }
 
-let surface =
-{
-	nearLeft: SURFACE_ORIGIN,
-	nearRight: { x: SURFACE_ORIGIN.x + SURFACE_NEAR_WIDTH, y: SURFACE_ORIGIN.y },
-	farLeft: { x: SURFACE_ORIGIN.x - (SURFACE_FAR_WIDTH - SURFACE_NEAR_WIDTH) / 2, y: SURFACE_ORIGIN.y - SURFACE_DEPTH },
-	farRight: { x: SURFACE_ORIGIN.x + (SURFACE_FAR_WIDTH + SURFACE_NEAR_WIDTH) / 2, y: SURFACE_ORIGIN.y - SURFACE_DEPTH},
-
-	gradient: ( ( SURFACE_FAR_WIDTH - SURFACE_NEAR_WIDTH ) / 2 ) / SURFACE_DEPTH
-}
-
-const surfaceGeometry = new THREE.BufferGeometry();
-const surfaceVertices = new Float32Array( [
-	surface.nearRight.x, 0, surface.nearRight.y,
-	surface.farLeft.x, 0, surface.farLeft.y,
-	surface.nearLeft.x, 0, surface.nearLeft.y,
-
-	surface.farRight.x, 0, surface.farRight.y,
-	surface.farLeft.x, 0, surface.farLeft.y,
-	surface.nearRight.x, 0, surface.nearRight.y
-] );
-surfaceGeometry.setAttribute( 'position', new THREE.BufferAttribute( surfaceVertices, 3 ) );
-const surfaceMaterial = new THREE.MeshBasicMaterial( { color: 'navy' } );
-const surfaceMesh = new THREE.Mesh( surfaceGeometry, surfaceMaterial );
+const surfaceMesh = createSurfaceMesh();
 scene.add( surfaceMesh );
 
-const cullPlaneGeometry = new THREE.BufferGeometry();
-const cullPlaneVertices = new Float32Array( [
-	surface.nearRight.x, 0, surface.nearRight.y,
-	surface.farRight.x, 20, surface.farRight.y,
-	surface.farRight.x, 0, surface.farRight.y,
-
-	surface.nearRight.x, 20, surface.nearRight.y,
-	surface.farRight.x, 20, surface.farRight.y,
-	surface.nearRight.x, 0, surface.nearRight.y
-] );
-cullPlaneGeometry.setAttribute( 'position', new THREE.BufferAttribute( cullPlaneVertices, 3 ) );
-const cullPlaneMaterial = new THREE.MeshBasicMaterial( { color: 'grey' } );
-const cullPlaneMesh = new THREE.Mesh( cullPlaneGeometry, cullPlaneMaterial );
+const cullPlaneMesh = createCullPlaneMesh();
 scene.add( cullPlaneMesh );
 
+const chunks = [];
 const towers = [];
 
-initTowers();
+for (let row = 0; row < CHUNK_ROWS; row++) {
+	chunks.push([])
+	for (let col = 0; col < CHUNK_COLS; col++) {
+		const chunkPos = genChunkPos(row);
+		chunks[chunks.length - 1].push(genChunk(chunkPos, (row * CHUNK_COLS + col) * TOWERS_PER_CHUNK * 24));
+	}
+}
 
 const towerGeometries = BufferGeometryUtils.mergeBufferGeometries(towers.map(t=>t.geometry), false);
-let mesh;
+let towerMesh;
 if (BASE_GEOMETRY) {
 	const baseMaterial = new THREE.LineBasicMaterial( { vertexColors: THREE.VertexColors } );
-	mesh = new THREE.LineSegments(towerGeometries, baseMaterial);
+	towerMesh = new THREE.LineSegments(towerGeometries, baseMaterial);
 } else {
 	const towerMaterial = new THREE.MeshBasicMaterial( { vertexColors: THREE.VertexColors } );
-	mesh = new THREE.Mesh(towerGeometries, towerMaterial);
+	towerMesh = new THREE.Mesh(towerGeometries, towerMaterial);
 }
-const towerMesh = mesh;
 towerMesh.position.x = MESH_ORIGIN.x;
 towerMesh.position.y = MESH_ORIGIN.y;
 towerMesh.position.z = MESH_ORIGIN.z;
 scene.add(towerMesh);
+
+for (const col of chunks) {
+	for (const chunk of col) {
+		initChunkMesh(chunk);
+	}
+}
 
 const debugLines = [];
 const debugMeshes = [];
@@ -136,119 +108,85 @@ function Tower(pos, base, height, geometry) {
 	this.geometry = geometry;
 }
 
-function initTowers() {
-	for (let i = 0; i < TOWER_COUNT; i++) {
-		//const newPos = genTowerPos();
-		const tower = genTower({x: rand(-200, 500), y: rand(-200, 200)});
+function Chunk(pos, geometryIndex, col) {
+	this.pos = pos;
+	this.towers = [];
+	this.mesh = null;
+	this.geometryIndex = geometryIndex;
+	this.col = col;
+}
+
+function initChunkMesh(chunk) {
+	const geo = new THREE.PlaneGeometry( CHUNK_CORE_SIZE, CHUNK_CORE_SIZE );
+	const mat = new THREE.MeshBasicMaterial( {color: chunk.col, side: THREE.DoubleSide} );
+	chunk.mesh = new THREE.Mesh( geo, mat );
+	chunk.mesh.position.x = chunk.pos.x + CHUNK_CORE_SIZE / 2 + CHUNK_CORE_OFFSET;
+	chunk.mesh.position.y = 1;
+	chunk.mesh.position.z = chunk.pos.y + CHUNK_CORE_SIZE / 2 + CHUNK_CORE_OFFSET;
+	chunk.mesh.rotation.x = Math.PI / 2;
+	towerMesh.add( chunk.mesh );
+}
+
+function createSurfaceMesh() {
+	const surfaceGeometry = new THREE.BufferGeometry();
+	const surfaceVertices = new Float32Array( [
+		surface.nearRight.x, 0, surface.nearRight.y,
+		surface.farLeft.x, 0, surface.farLeft.y,
+		surface.nearLeft.x, 0, surface.nearLeft.y,
+
+		surface.farRight.x, 0, surface.farRight.y,
+		surface.farLeft.x, 0, surface.farLeft.y,
+		surface.nearRight.x, 0, surface.nearRight.y
+	] );
+	surfaceGeometry.setAttribute( 'position', new THREE.BufferAttribute( surfaceVertices, 3 ) );
+	const surfaceMaterial = new THREE.MeshBasicMaterial( { color: 'navy' } );
+	return new THREE.Mesh( surfaceGeometry, surfaceMaterial );
+}
+
+function createCullPlaneMesh() {
+	const cullPlaneGeometry = new THREE.BufferGeometry();
+	const cullPlaneVertices = new Float32Array( [
+		surface.nearRight.x, 0, surface.nearRight.y,
+		surface.farRight.x, 20, surface.farRight.y,
+		surface.farRight.x, 0, surface.farRight.y,
+
+		surface.nearRight.x, 20, surface.nearRight.y,
+		surface.farRight.x, 20, surface.farRight.y,
+		surface.nearRight.x, 0, surface.nearRight.y
+	] );
+	cullPlaneGeometry.setAttribute( 'position', new THREE.BufferAttribute( cullPlaneVertices, 3 ) );
+	const cullPlaneMaterial = new THREE.MeshBasicMaterial( { color: 'grey' } );
+	return new THREE.Mesh( cullPlaneGeometry, cullPlaneMaterial );
+}
+
+function genChunkPos(row) {
+	if (chunks[row].length > 0) {
+		const joinedChunk = chunks[row][chunks[row].length - 1];
+		let chunkPos = { 
+			x: joinedChunk.pos.x - CHUNK_CORE_SIZE - CHUNK_CORE_OFFSET, 
+			y: joinedChunk.pos.y
+		};
+		return chunkPos;
+	} else {
+		return { x: 0, y: (-CHUNK_SIZE) - ((CHUNK_CORE_SIZE + CHUNK_CORE_OFFSET) * row) };
+	}
+}
+
+function genChunk(chunkPos, geometryIndex) {
+	const col = new THREE.Color(`hsl(${rand(0, 255)}, 80%, 20%)`);
+	const chunk = new Chunk(chunkPos, geometryIndex, col);
+
+	for (let i = 0; i < TOWERS_PER_CHUNK; i++) {
+		const towerPos = genTowerPos(chunkPos);
+		const tower = genTower(towerPos);
 		towers.push(tower);
-	}
-}
-
-function resetMeshOrigin() {
-
-	let offsetX = towerMesh.position.x - MESH_ORIGIN.x;
-	let offsetY = towerMesh.position.y - MESH_ORIGIN.y;
-	let offsetZ = towerMesh.position.z - MESH_ORIGIN.z;
-
-	for (let tower of towers) {
-		translateGeometry(tower.geometry, offsetX, offsetY, offsetZ);
-		tower.pos.x += offsetX;
-		tower.pos.y += offsetZ;
-
-		for (let p in tower.base) {
-			tower.base[p].x += offsetX;
-			tower.base[p].y += offsetZ;
-		}
+		chunk.towers.push(tower);
 	}
 
-	translateGeometry(towerGeometries, offsetX, offsetY, offsetZ);
-	
-	towerMesh.position.x = MESH_ORIGIN.x;
-	towerMesh.position.y = MESH_ORIGIN.y;
-	towerMesh.position.z = MESH_ORIGIN.z;
-
-}
-
-function translateGeometry(geometry, x, y, z) {
-	for (let i = 0; i < geometry.attributes.position.array.length; i += 3) {
-		geometry.attributes.position.array[i] += x; 
-		geometry.attributes.position.array[i + 1] += y; 
-		geometry.attributes.position.array[i + 2] += z; 
-	}
-
-	geometry.computeBoundingBox();
-	geometry.attributes.position.needsUpdate = true;
-}
-
-function updateTowers() {
-	for (let i = 0; i < towers.length; i++) {
-		if (!towerOnSurface(towers[i])) {
-			const newPos = genTowerPos();
-			const newTower = genTower(newPos);
-			updateTowerGeometry(i, newTower);			
-		}
-	}
-
-	if (towerMesh.position.x > 0) {
-		resetMeshOrigin();
-	}
+	return chunk;
 }
 
 /*
-function genTowerPos() {
-	const scanOrigin = new THREE.Vector3(surface.nearLeft.x, 1, surface.nearLeft.y);
-	const scanEnd = new THREE.Vector3(surface.farLeft.x, 1, surface.farLeft.y);
-	const scanStep = new THREE.Vector3().subVectors(scanEnd, scanOrigin).divideScalar(POS_SCAN_COUNT + 1);	
-
-	let scanPos;
-	let furthestDistance = 0;
-	let furthestIntersection = null;
-
-	while (debugLines.length > 0) {
-		debugLines.pop().removeFromParent();
-	}
-
-	for (let i = 0; i < POS_SCAN_COUNT; i++) {
-		
-		//scanPos = scanOrigin.clone().add(scanStep.clone().multiplyScalar((i + 1) + rand(-POS_SCAN_NOISE, POS_SCAN_NOISE)));
-		scanPos = scanOrigin.clone().add(scanStep.clone().multiplyScalar((Math.floor(rand(0, POS_SCAN_COUNT-1)) + 1) + rand(-POS_SCAN_NOISE, POS_SCAN_NOISE)));
-
-		const raycaster = new THREE.Raycaster();
-		const direction = new THREE.Vector3(1,0,0);
-
-		raycaster.set(scanPos, direction)
-		const intersections = raycaster.intersectObjects( [towerMesh, cullPlaneMesh] );		
-
-		const intersect = intersections[0];
-
-		if (intersections.length == 1) {
-			furthestDistance = Number.POSITIVE_INFINITY;
-			furthestIntersection = intersect.point;
-		} else if (intersect.distance > furthestDistance) {
-			furthestDistance = intersect.distance;
-			furthestIntersection = intersect.point;
-		}
-		
-		const distance = 50;
-		let end = intersections.length > 1 ? intersections[0].point : new THREE.Vector3().addVectors( scanPos,  direction.multiplyScalar( distance ) );
-		const points = [];
-		points.push( scanPos );
-		points.push( end );
-		const geometry = new THREE.BufferGeometry().setFromPoints(points);
-		const material = new THREE.LineBasicMaterial( { color : intersections.length == 0 ? 0x00ff00 : 0xff0000 } );
-		const line = new THREE.Line( geometry, material );
-		debugLines.push( line );
-		scene.add( line );
-	}
-
-	let pos = { x: furthestIntersection.x - towerMesh.position.x, y: furthestIntersection.z - towerMesh.position.z };
-	let xOffset = TOWER_SIZE + rand(3, 20);
-	pos.x -= xOffset;
-
-	return pos;
-}
-*/
-
 function pointBuildable(point) {
 
 	let pos = {x: point.x - towerMesh.position.x, y: point.y - towerMesh.position.z};
@@ -273,56 +211,17 @@ function pointBuildable(point) {
 		}
 	}
 	return true;
-}
+}*/
 
-function genTowerPos() {
-
-	const scanOrigin = new THREE.Vector3(surface.nearRight.x-1, 1, surface.nearRight.y+1);
-	const scanEnd = new THREE.Vector3(surface.farRight.x-1, 1, surface.farRight.y-1);
-	const scanInterval = new THREE.Vector3().subVectors(scanEnd, scanOrigin).divideScalar(POS_SCAN_COUNT);
-	const rayDir = { x: -1, y: 0 };
-
-	const surfaceShape = {
-		topLeft: surface.farLeft,
-		topRight: surface.farRight,
-		botLeft: surface.nearLeft,
-		botRight: surface.nearRight
-	};
-
-	let emptyPos = { x: null, y: null };
-	//let emptyPosDist = Number.POSITIVE_INFINITY;
-
-	for (let i = 0; i < POS_SCAN_COUNT; i++) {
-		
-		const rayOrigin = scanOrigin.clone().add(scanInterval.clone().multiplyScalar(i + rand(0, 1)));
-		
-		let rayPos = { x: rayOrigin.x, y: rayOrigin.z };
-		//let travelledDist = 0;
-		let rayEnded = false;
-
-		//while (travelledDist < emptyPosDist && !rayEnded && pointInShape(rayPos, surfaceShape)) {
-		while (!rayEnded && pointInShape(rayPos, surfaceShape)) {
-		
-			if (pointBuildable(rayPos)) {
-				emptyPos.x = rayPos.x;
-				emptyPos.y = rayPos.y;
-				//emptyPosDist = travelledDist;
-				rayEnded = true;
-			}
-
-			rayPos.x += rayDir.x * POS_RAY_STEP;
-			rayPos.y += rayDir.y * POS_RAY_STEP;
-			//travelledDist += POS_RAY_STEP;
-		}
-	}
-
-	let pos = {x: emptyPos.x - towerMesh.position.x, y: emptyPos.y - towerMesh.position.z};
-	return pos;
+function genTowerPos(chunkPos) {
+	let towerPos = { x: chunkPos.x, y: chunkPos.y };
+	towerPos.x += rand(0, CHUNK_SIZE);
+	towerPos.y += rand(0, CHUNK_SIZE);
+	return towerPos;
 }
 
 function genTower({x, y}) {
-	
-	let tower = new Tower({x, y}, null, Math.floor(rand(5, 50)), null);
+	let tower = new Tower({x, y}, null, rand(5, 50), null);
 	tower.base = {
 		p1: { x: x, y: y },
 		p2: { x: x, y: y + TOWER_SIZE }, 
@@ -333,29 +232,17 @@ function genTower({x, y}) {
 	return tower;
 }
 
-function updateTowerGeometry(idx, tower) {
-
-	towers[idx] = tower;
-
-	for (let i = 0; i < 24; i++) {
-		towerGeometries.attributes.position.array[(idx * 24) + i] = tower.geometry.attributes.position.array[i];
-	}
-
-	towerGeometries.attributes.position.needsUpdate = true;
-
-}
-
 function genBaseGeometry({p1, p2, p3, p4}, color) {
 	const points = [];
 	
-	points.push( new THREE.Vector3( p1.x, 0, p1.y ) );
-	points.push( new THREE.Vector3( p2.x, 0, p2.y ) );
+	points.push( new THREE.Vector3( p1.x, 1, p1.y ) );
+	points.push( new THREE.Vector3( p2.x, 1, p2.y ) );
 	
 	points.push(points[1]);
-	points.push( new THREE.Vector3( p3.x, 0, p3.y ) );
+	points.push( new THREE.Vector3( p3.x, 1, p3.y ) );
 	
 	points.push(points[3]);
-	points.push( new THREE.Vector3( p4.x, 0, p4.y ) );
+	points.push( new THREE.Vector3( p4.x, 1, p4.y ) );
 	
 	points.push(points[5]);
 	points.push(points[0]);
@@ -414,6 +301,92 @@ function genTowerGeometry({p1, p2, p3, p4}, height, color) {
 	return geometry;
 }
 
+function updateChunks() {
+	
+
+	for (let row = 0; row < CHUNK_ROWS; row++) {
+		for (let col = 0; col < CHUNK_COLS; col++) {
+
+			const chunkPosInWorld = { 
+				x: chunks[row][col].pos.x + towerMesh.position.x,
+				y: chunks[row][col].pos.y + towerMesh.position.z
+			};
+
+			if (pointOnLineSide(chunkPosInWorld, cullLine, true)) {
+				const newChunkPos = genChunkPos(row);
+				const newChunk = genChunk(newChunkPos, chunks[row][col].geometryIndex);
+				initChunkMesh(newChunk);
+				chunks[row].shift().mesh.removeFromParent();
+				chunks[row].push(newChunk);
+				updateGeometry(newChunk.geometryIndex, newChunk);	
+				col -= 1;
+			}
+		}
+	}
+
+	if (towerMesh.position.x > 100) {
+		resetMeshOrigin();
+	}
+}
+
+function updateGeometry(idx, chunk) {
+	
+	for (let i = 0; i < TOWERS_PER_CHUNK; i++) {
+		for (let j = 0; j < 24; j++) {
+			towerGeometries.attributes.position.array[idx + (i * 24) + j] = chunk.towers[i].geometry.attributes.position.array[j];
+		}
+	}
+
+	towerGeometries.attributes.position.needsUpdate = true;
+
+}
+
+function resetMeshOrigin() {
+
+	let offsetX = towerMesh.position.x - MESH_ORIGIN.x;
+	let offsetY = towerMesh.position.y - MESH_ORIGIN.y;
+	let offsetZ = towerMesh.position.z - MESH_ORIGIN.z;
+
+	for (const tower of towers) {
+		translateGeometry(tower.geometry, offsetX, offsetY, offsetZ);
+		tower.pos.x += offsetX;
+		tower.pos.y += offsetZ;
+
+		for (let p in tower.base) {
+			tower.base[p].x += offsetX;
+			tower.base[p].y += offsetZ;
+		}
+	}
+
+	for (const row of chunks) {
+		for (const chunk of row) {
+			chunk.pos.x += offsetX;
+			chunk.pos.y += offsetZ;
+			chunk.mesh.position.x += offsetX;
+			chunk.mesh.position.y += offsetY;
+			chunk.mesh.position.z += offsetZ;
+		}
+	}	
+
+	translateGeometry(towerGeometries, offsetX, offsetY, offsetZ);
+	
+	towerMesh.position.x = MESH_ORIGIN.x;
+	towerMesh.position.y = MESH_ORIGIN.y;
+	towerMesh.position.z = MESH_ORIGIN.z;
+
+}
+
+function translateGeometry(geometry, x, y, z) {
+	for (let i = 0; i < geometry.attributes.position.array.length; i += 3) {
+		geometry.attributes.position.array[i] += x; 
+		geometry.attributes.position.array[i + 1] += y; 
+		geometry.attributes.position.array[i + 2] += z; 
+	}
+
+	geometry.computeBoundingBox();
+	geometry.attributes.position.needsUpdate = true;
+}
+
 function setTowerColor(idx, color) {
 	for (let i = 0; i < 24; i++) {
 		towerGeometries.attributes.color.array[(idx * 24) + i] = color.toArray()[i % 3];
@@ -421,7 +394,7 @@ function setTowerColor(idx, color) {
 	towerGeometries.attributes.color.needsUpdate = true;
 }
 
-function pointInShape(point, {topLeft, topRight, botLeft, botRight}) {
+function pointOnShape(point, {topLeft, topRight, botLeft, botRight}) {
 
 	const gradTLTR = (topRight.y - topLeft.y) / (topRight.x - topLeft.x);
 	const gradBLTL = -(topLeft.x - botLeft.x) / (topLeft.y - botLeft.y);
@@ -435,29 +408,17 @@ function pointInShape(point, {topLeft, topRight, botLeft, botRight}) {
 
 }
 
-function towerOnSurface(tower) {
+function pointOnLineSide(point, { p1, p2 }, greaterThan) {
+	const gradient = -(p2.y - p1.y) / (p2.x - p1.x);
+	const invGradient = 1/gradient;
 
-	for (let corner in tower.base) {
-
-		const point = {
-			x: tower.base[corner].x + towerMesh.position.x, 
-			y: tower.base[corner].y + towerMesh.position.z
-		};
-
-		const shape = {
-			topLeft: surface.farLeft,
-			topRight: surface.farRight,
-			botLeft: surface.nearLeft,
-			botRight: surface.nearRight
-		};
-
-		if (pointInShape(point, shape)) {
-			return true;
-		}
-
+	if (greaterThan) {
+		return point.x > p1.x + invGradient * -(point.y - p1.y) &&
+			point.y > -(p1.y + gradient * (point.x - p1.x));
+	} else {
+		return point.x < p1.x + invGradient * -(point.y - p1.y) &&
+			point.y < -(p1.y + gradient * (point.x - p1.x));
 	}
-
-	return false;
 }
 	
 function rand(min, max) {
@@ -495,7 +456,7 @@ function update(time) {
 	}
 	
 	if (time > 1) {
-		updateTowers();
+		updateChunks();
 	}
 }
 
@@ -517,6 +478,6 @@ function render(time) {
 
 function onDocumentKeyDown( event ) {
 	event.preventDefault();
-	updateTowers();
+	updateChunks();
 	scrollSpeed == 0 ? scrollSpeed = SCROLL_SPEED : scrollSpeed = 0;
 }

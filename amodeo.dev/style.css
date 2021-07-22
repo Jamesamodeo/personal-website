@@ -1,6 +1,32 @@
 #dark-theme { display: none; }
 
+.noselect {
+	-webkit-touch-callout: none; /* iOS Safari */
+	  -webkit-user-select: none; /* Safari */
+	   -khtml-user-select: none; /* Konqueror HTML */
+		 -moz-user-select: none; /* Firefox */
+		  -ms-user-select: none; /* Internet Explorer/Edge */
+			  user-select: none; /* Non-prefixed version, currently
+									supported by Chrome and Opera */
+}
+
 #graphics {
+	position: absolute;
+	top: 0px;
+	width: 100vw;
+	height: 100vh;
+	z-index: -2;
+}
+
+#blocktest {
+	width: 100vw;
+	height: 100vh;
+	position: absolute;
+	top: 0px;
+	z-index: -3;
+}
+
+#cacheintheclouds-canvas {
 	position: absolute;
 	top: 0px;
 	width: 100vw;
